@@ -1,68 +1,47 @@
 param(
-     [Parameter()]
-     [string]$GitHubDestinationPAT,
- 
-     [Parameter()]
-     [string]$ADOSourcePAT,
-     
-     [Parameter()]
-     [string]$AzureRepoName,
-     
-     [Parameter()]
-     [string]$ADOCloneURL,
-     
-     [Parameter()]
-     [string]$GitHubCloneURL
- )
+    [Parameter(Mandatory=$true)][string]$GitHubDestinationPAT,
+    [Parameter(Mandatory=$true)][string]$ADOSourcePAT,
+    [Parameter(Mandatory=$true)][string]$AzureRepoName,
+    [Parameter(Mandatory=$true)][string]$ADOCloneURL,
+    [Parameter(Mandatory=$true)][string]$GitHubCloneURL
+)
 
-# Write your PowerShell commands here.
-Write-Host ' - - - - - - - - - - - - - - - - - - - - - - - - -'
-Write-Host ' reflect Azure Devops repo changes to GitHub repo'
-Write-Host ' - - - - - - - - - - - - - - - - - - - - - - - - - '
-$AzureRepoName = "avd-accelerator"
-$ADOCloneURL = "dev.azure.com/nerdlabio/nerdlab.io/_git/avd-accelerator"
-$GitHubCloneURL = "github.com/jsan-codes/avdaccelerator.git"
-$stageDir = pwd | Split-Path
-Write-Host "stage Dir is : $stageDir"
-$githubDir = $stageDir +"\"+"gitHub"
-Write-Host "github Dir : $githubDir"
-$destination = $githubDir+"\"+ $AzureRepoName+".git"
-Write-Host "destination: $destination"
-#Please make sure, you remove https from azure-repo-clone-url
-$sourceURL = "https://$($ADOSourcePAT)"+"@"+"$($ADOCloneURL)"
-write-host "source URL : $sourceURL"
-#Please make sure, you remove https from github-repo-clone-url
-$destURL = "https://" + $($GitHubDestinationPAT) +"@"+"$($GitHubCloneURL)"
-write-host "dest URL : $destURL"
-#Check if the parent directory exists and delete
-if((Test-Path -path $githubDir))
-{
-  Remove-Item -Path $githubDir -Recurse -force
+# --- Variables ---
+$workingDir = Join-Path $env:TEMP "RepoSync"
+$repoDir = Join-Path $workingDir "$AzureRepoName.git"
+
+# Construct Clone URLs with PAT
+$githubURL = "https://$($GitHubDestinationPAT)@$($GitHubCloneURL -replace '^https://')"
+$adoURL    = "https://$($ADOSourcePAT)@$($ADOCloneURL -replace '^https://')"
+
+# Output debug info
+Write-Host "GitHub URL: $githubURL"
+Write-Host "Azure DevOps URL: $adoURL"
+Write-Host "Working Dir: $workingDir"
+Write-Host "Repo Dir: $repoDir"
+
+# Clean previous directories
+if (Test-Path $workingDir) {
+    Remove-Item -Path $workingDir -Recurse -Force -ErrorAction SilentlyContinue
 }
-if(!(Test-Path -path $githubDir))
-{
-  New-Item -ItemType directory -Path $githubDir
-  Set-Location $githubDir
-  git clone --mirror $sourceURL
-}
-else
-{
-  Write-Host "The given folder path $githubDir already exists";
-}
-Set-Location $destination
-Write-Output '*****Git removing remote secondary****'
-git remote rm secondary
-Write-Output '*****Git remote add****'
-git remote add --mirror=fetch secondary $destURL
-Write-Output '*****Git fetch origin****'
-git fetch $sourceURL
-Write-Output '*****Git push secondary****'
-#git remote set-url origin $destURLSetURL
-git push secondary  --all -f
-Write-Output '**Azure Devops repo synced with Github repo**'
-Set-Location $stageDir
-if((Test-Path -path $githubDir))
-{
- Remove-Item -Path $githubDir -Recurse -force
-}
-write-host "Job completed"
+New-Item -Path $workingDir -ItemType Directory | Out-Null
+
+# Clone GitHub repo as mirror (source is GitHub)
+Set-Location $workingDir
+git clone --mirror $githubURL $repoDir
+
+# Navigate to cloned repo
+Set-Location $repoDir
+
+# Configure Azure DevOps as secondary remote
+git remote add azure $adoURL
+
+# Push all refs to Azure DevOps (destination)
+git push azure --mirror --force
+
+Write-Host "**GitHub repo synced to Azure DevOps repo successfully!**"
+
+# Cleanup working directory
+Set-Location $workingDir
+Remove-Item -Path $repoDir -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "Job completed, cleanup done."
